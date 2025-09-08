@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "outDir": "dist",
+    "baseUrl": ".",
+    "paths": {
+      "@config/*": ["src/config/*"],
+      "@plugins/*": ["src/plugins/*"],
+      "@routes/*": ["src/routes/*"],
+      "@services/*": ["src/services/*"],
+      "@queues/*": ["src/queues/*"]
+    }
+  },
+  "include": ["src", "prisma"]
+}
