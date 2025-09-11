@@ -1,0 +1,271 @@
+# Directory: tunetrace-backend (Step 1 & 2 implemented)
+
+## package.json
+{
+  "name": "tunetrace-backend",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc -p tsconfig.json",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "worker": "tsx watch src/workers/fingerprint.worker.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.637.0",
+    "@fastify/cors": "^10.0.1",
+    "@fastify/multipart": "^9.0.1",
+    "@fastify/websocket": "^10.0.1",
+    "@prisma/client": "^5.20.0",
+    "bullmq": "^5.13.1",
+    "dotenv": "^16.4.5",
+    "fastify": "^5.0.0",
+    "ioredis": "^5.4.1",
+    "pino": "^9.3.2",
+    "pino-pretty": "^11.2.2",
+    "wavefile": "^12.1.2",
+    "fft.js": "^4.0.4",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "prisma": "^5.20.0",
+    "ts-node": "^10.9.2",
+    "tslib": "^2.7.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.2"
+  }
+}
+
+## src/services/fingerprint.ts
+import { WaveFile } from "wavefile";
+import FFT from "fft.js";
+
+// ---- Tunables ----
+export const TARGET_SR = 44100;
+const FRAME_SIZE = 2048;   // ~46 ms
+const HOP_SIZE = 512;      // 75% overlap
+const PEAK_NEIGH_T = 5;    // +/- frames
+const PEAK_NEIGH_F = 5;    // +/- bins
+const PEAK_MIN_DB = -60;   // ignore very low energy
+const PAIR_DT_FRAMES = { min: 1, max: 20 }; // ~ (0.02s .. 0.45s)
+const MAX_PAIRS_PER_ANCHOR = 5;
+
+export type Posting = { hash: string; tOffsetMs: number };
+
+export async function createFingerprint(audioBuf: Buffer): Promise<Posting[]> {
+  const { pcm, sr } = decodeWavToMono(audioBuf);
+  const resampled = (sr === TARGET_SR) ? pcm : resampleLinear(pcm, sr, TARGET_SR);
+  const mag = stftMag(resampled, FRAME_SIZE, HOP_SIZE);
+  const magDb = mag.map(col => col.map(v => 20 * Math.log10(v + 1e-9)));
+  const peaks = pickPeaks(magDb);
+
+  const postings: Posting[] = [];
+  for (let i = 0; i < peaks.length; i++) {
+    const [t1, f1] = peaks[i];
+    let pairs = 0;
+    for (let j = i + 1; j < peaks.length; j++) {
+      const [t2, f2] = peaks[j];
+      const dt = t2 - t1;
+      if (dt < PAIR_DT_FRAMES.min) continue;
+      if (dt > PAIR_DT_FRAMES.max) break;
+      postings.push({ hash: makeHash(f1, f2, dt), tOffsetMs: framesToMs(t1) });
+      if (++pairs >= MAX_PAIRS_PER_ANCHOR) break;
+    }
+  }
+  return postings;
+}
+
+// ---- Helpers ----
+function decodeWavToMono(buf: Buffer): { pcm: Float32Array; sr: number } {
+  const wav = new WaveFile(buf);
+  if (wav.fmt.bitsPerSample !== 16) wav.toBitDepth("16");
+  if (wav.fmt.numChannels > 1) wav.toMono();
+  const sr = wav.fmt.sampleRate;
+  const samples = wav.getSamples(true, Int16Array) as Int16Array;
+  const pcm = new Float32Array(samples.length);
+  for (let i = 0; i < samples.length; i++) pcm[i] = samples[i] / 32768;
+  return { pcm, sr };
+}
+
+function resampleLinear(src: Float32Array, srFrom: number, srTo: number): Float32Array {
+  const ratio = srTo / srFrom;
+  const outLen = Math.floor(src.length * ratio);
+  const out = new Float32Array(outLen);
+  for (let i = 0; i < outLen; i++) {
+    const x = i / ratio;
+    const x0 = Math.floor(x);
+    const x1 = Math.min(x0 + 1, src.length - 1);
+    const frac = x - x0;
+    out[i] = src[x0] * (1 - frac) + src[x1] * frac;
+  }
+  return out;
+}
+
+function hann(N: number): Float32Array {
+  const w = new Float32Array(N);
+  for (let n = 0; n < N; n++) w[n] = 0.5 * (1 - Math.cos((2 * Math.PI * n) / (N - 1)));
+  return w;
+}
+
+function stftMag(signal: Float32Array, frame: number, hop: number): number[][] {
+  const window = hann(frame);
+  const bins = frame / 2 + 1;
+  const fft = new FFT(frame);
+  const columns: number[][] = [];
+  const input = fft.createComplexArray();
+  const spectrum = fft.createComplexArray();
+
+  for (let start = 0; start + frame <= signal.length; start += hop) {
+    for (let n = 0; n < frame; n++) {
+      const s = signal[start + n] * window[n];
+      input[2*n] = s; input[2*n+1] = 0;
+    }
+    fft.transform(spectrum, input);
+
+    const mag = new Array(bins);
+    for (let k = 0; k < bins; k++) {
+      const re = spectrum[2*k];
+      const im = spectrum[2*k+1];
+      mag[k] = Math.hypot(re, im);
+    }
+    columns.push(mag);
+  }
+  return columns; // [timeFrames][freqBins]
+}
+
+function pickPeaks(magDb: number[][]): Array<[number, number]> {
+  const peaks: Array<[number, number]> = [];
+  const T = magDb.length; if (T === 0) return peaks;
+  const F = magDb[0].length;
+  for (let t = PEAK_NEIGH_T; t < T - PEAK_NEIGH_T; t++) {
+    for (let f = PEAK_NEIGH_F; f < F - PEAK_NEIGH_F; f++) {
+      const val = magDb[t][f];
+      if (val < PEAK_MIN_DB) continue;
+      let isMax = true;
+      for (let dt = -PEAK_NEIGH_T; dt <= PEAK_NEIGH_T && isMax; dt++) {
+        for (let df = -PEAK_NEIGH_F; df <= PEAK_NEIGH_F; df++) {
+          if (dt === 0 && df === 0) continue;
+          if (magDb[t+dt][f+df] > val) { isMax = false; break; }
+        }
+      }
+      if (isMax) peaks.push([t, f]);
+    }
+  }
+  peaks.sort((a,b) => a[0]-b[0]);
+  return peaks;
+}
+
+function makeHash(f1: number, f2: number, dtFrames: number): string {
+  const v1 = BigInt(f1 & 0xFFFFF);
+  const v2 = BigInt(f2 & 0xFFFFF);
+  const v3 = BigInt(dtFrames & 0xFFF);
+  const packed = (v1 << BigInt(32)) | (v2 << BigInt(12)) | v3;
+  return "0x" + packed.toString(16);
+}
+
+function framesToMs(tFrame: number): number { return Math.round((tFrame * HOP_SIZE) * 1000 / TARGET_SR); }
+
+## src/routes/ws.ts
+import { FastifyPluginAsync } from "fastify";
+import { createFingerprint } from "@services/fingerprint.js";
+
+// Simple matcher over Redis postings: fp:{hash} -> ["songId:offsetMs", ...]
+async function matchHashes(app: any, postings: { hash: string; tOffsetMs: number }[]) {
+  const votes = new Map<string, number>(); // key: `${songId}|${delta}`
+
+  for (const p of postings) {
+    const list = await app.redis.lrange(`fp:${p.hash}`, 0, 500); // cap per hash
+    for (const item of list) {
+      const [songId, offStr] = item.split(":");
+      const off = parseInt(offStr, 10);
+      const delta = off - p.tOffsetMs;
+      const key = `${songId}|${delta}`;
+      votes.set(key, (votes.get(key) || 0) + 1);
+    }
+  }
+
+  let bestKey = ""; let bestVotes = 0;
+  for (const [k, v] of votes.entries()) { if (v > bestVotes) { bestVotes = v; bestKey = k; } }
+  if (!bestKey) return null;
+
+  const [songId, deltaStr] = bestKey.split("|");
+  const track = await app.prisma.track.findUnique({ where: { id: songId } });
+  if (!track) return null;
+
+  return {
+    song_id: track.id,
+    title: track.title,
+    artist: track.artist,
+    confidence: bestVotes,
+    delta_ms: Number(deltaStr)
+  };
+}
+
+const wsRoutes: FastifyPluginAsync = async (app) => {
+  app.get("/stream", { websocket: true }, (conn) => {
+    conn.socket.on("message", async (msg: Buffer) => {
+      try {
+        // For simplicity in the POC, expect WAV chunks from client
+        const postings = await createFingerprint(msg);
+        const match = await matchHashes(app, postings);
+        conn.socket.send(JSON.stringify({ ok: true, match }));
+      } catch (err:any) {
+        app.log.error(err);
+        conn.socket.send(JSON.stringify({ ok: false, error: err?.message || "decode_error" }));
+      }
+    });
+    conn.socket.on("close", () => app.log.info("WS disconnected"));
+  });
+};
+
+export default wsRoutes;
+
+## src/workers/fingerprint.worker.ts
+import { Worker, Job } from "bullmq";
+import { connection } from "@queues/index.js";
+import { loadEnv } from "@config/env.js";
+import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { prisma } from "@plugins/prisma.js";
+import { createFingerprint } from "@services/fingerprint.js";
+import IORedis from "ioredis";
+
+const env = loadEnv();
+const s3 = new S3Client({
+  region: env.S3_REGION,
+  endpoint: env.S3_ENDPOINT,
+  credentials: { accessKeyId: env.S3_ACCESS_KEY, secretAccessKey: env.S3_SECRET_KEY },
+  forcePathStyle: env.S3_FORCE_PATH_STYLE === "true"
+});
+const redis = new IORedis(env.REDIS_URL);
+
+async function streamToBuffer(stream: any): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(chunk as Buffer);
+  return Buffer.concat(chunks);
+}
+
+new Worker(
+  `${env.QUEUE_PREFIX}:fingerprint`,
+  async (job: Job) => {
+    const { trackId, s3Key } = job.data as { trackId: string; s3Key: string };
+    await prisma.track.update({ where: { id: trackId }, data: { status: "FINGERPRINTING" } });
+
+    const obj = await s3.send(new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: s3Key }));
+    const audioBuf = await streamToBuffer(obj.Body as any);
+
+    const postings = await createFingerprint(audioBuf);
+
+    const pipeline = redis.pipeline();
+    for (const p of postings) pipeline.rpush(`fp:${p.hash}`, `${trackId}:${p.tOffsetMs}`);
+    await pipeline.exec();
+
+    await prisma.track.update({ where: { id: trackId }, data: { status: "READY" } });
+
+    return { hashes: postings.length };
+  },
+  { connection }
+);
