@@ -4,7 +4,7 @@ import { loadEnv } from "@config/env.js";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { prisma } from "@plugins/prisma.js";
 import { createFingerprint } from "@services/fingerprint.js";
-
+import IORedis from "ioredis";
 
 const env = loadEnv();
 const s3 = new S3Client({
@@ -13,7 +13,7 @@ const s3 = new S3Client({
     credentials: { accessKeyId: env.S3_ACCESS_KEY, secretAccessKey: env.S3_SECRET_KEY },
     forcePathStyle: env.S3_FORCE_PATH_STYLE === "true"
 });
-
+const redis = new IORedis(env.REDIS_URL);
 
 async function streamToBuffer(stream: any): Promise<Buffer> {
     const chunks: Buffer[] = [];
@@ -28,21 +28,16 @@ new Worker(
         const { trackId, s3Key } = job.data as { trackId: string; s3Key: string };
         await prisma.track.update({ where: { id: trackId }, data: { status: "FINGERPRINTING" } });
 
-
-        // Download audio
         const obj = await s3.send(new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: s3Key }));
         const audioBuf = await streamToBuffer(obj.Body as any);
 
-
-        // Compute fingerprint (constellation -> hashes)
         const postings = await createFingerprint(audioBuf);
-        // Save postings to Redis index (hash -> list of (songId, tOffset))
-        // TODO: batch pipeline into Redis for performance
 
+        const pipeline = redis.pipeline();
+        for (const p of postings) pipeline.rpush(`fp:${p.hash}`, `${trackId}:${p.tOffsetMs}`);
+        await pipeline.exec();
 
-        // Mark as ready
         await prisma.track.update({ where: { id: trackId }, data: { status: "READY" } });
-
 
         return { hashes: postings.length };
     },
