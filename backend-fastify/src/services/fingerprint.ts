@@ -1,4 +1,4 @@
-import { WaveFile } from "wavefile";
+import wavefile from "wavefile";
 import FFT from "fft.js";
 
 // ---- Tunables ----
@@ -38,7 +38,7 @@ export async function createFingerprint(audioBuf: Buffer): Promise<Posting[]> {
 
 // ---- Helpers ----
 export function decodeWavToMono(buf: Buffer): { pcm: Float32Array; sr: number } {
-  const wav = new WaveFile(buf);
+  const wav = new wavefile.WaveFile(buf);
 
   const fmtAny: any = wav.fmt as any;
   const numCh: number = (fmtAny && typeof fmtAny.numChannels === "number") ? fmtAny.numChannels : 1;
