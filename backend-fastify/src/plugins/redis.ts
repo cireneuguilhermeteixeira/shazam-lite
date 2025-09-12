@@ -1,5 +1,5 @@
 import fp from "fastify-plugin";
-import IORedis from "ioredis";
+import IORedis, { Redis } from "ioredis";
 import { loadEnv } from "@config/env.js";
 
 
@@ -15,6 +15,6 @@ export const redisPlugin = fp(async (app) => {
 
 declare module "fastify" {
     interface FastifyInstance {
-        redis: IORedis.Redis;
+        redis: Redis;
     }
 }
