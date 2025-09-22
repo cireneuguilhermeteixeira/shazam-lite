@@ -8,7 +8,7 @@ const env = loadEnv();
 
 // export const connection = new IORedis(env.REDIS_URL);
 
-const connection = new IORedis(env.REDIS_URL, {
+export const connection = new IORedis(env.REDIS_URL, {
   maxRetriesPerRequest: null,
 });
 
