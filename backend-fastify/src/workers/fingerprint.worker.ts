@@ -23,7 +23,7 @@ async function streamToBuffer(stream: any): Promise<Buffer> {
 
 
 new Worker(
-    `${env.QUEUE_PREFIX}:fingerprint`,
+    "fingerprint",
     async (job: Job) => {
         const { trackId, s3Key } = job.data as { trackId: string; s3Key: string };
         await prisma.track.update({ where: { id: trackId }, data: { status: "FINGERPRINTING" } });
@@ -41,5 +41,8 @@ new Worker(
 
         return { hashes: postings.length };
     },
-    { connection }
+    { 
+        connection,
+        prefix: env.QUEUE_PREFIX
+     }
 );
