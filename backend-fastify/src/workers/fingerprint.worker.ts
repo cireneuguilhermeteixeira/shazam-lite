@@ -4,6 +4,7 @@ import { loadEnv } from "@config/env.js";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { prisma } from "@plugins/prisma.js";
 import { createFingerprint } from "@services/fingerprint.js";
+import { anyToWavPCM16Mono44k } from "@services/transcode.js";
 import IORedis from "ioredis";
 
 const env = loadEnv();
@@ -30,8 +31,12 @@ new Worker(
 
         const obj = await s3.send(new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: s3Key }));
         const audioBuf = await streamToBuffer(obj.Body as any);
+        const contentType = obj.ContentType;
+        const looksMP3 = (contentType?.includes("mpeg") || s3Key.toLowerCase().endsWith(".mp3"));
 
-        const postings = await createFingerprint(audioBuf);
+        const wavBuf = looksMP3 ? await anyToWavPCM16Mono44k(audioBuf) : audioBuf;
+
+        const postings = await createFingerprint(wavBuf);
 
         const pipeline = redis.pipeline();
         for (const p of postings) pipeline.rpush(`fp:${p.hash}`, `${trackId}:${p.tOffsetMs}`);
