@@ -45,8 +45,10 @@ const routes: FastifyPluginAsync = async (app) => {
 
 
         // Enqueue fingerprinting job
-        await fingerprintQueue.add("fingerprint_track", { trackId: track.id, s3Key: filename });
-
+        await fingerprintQueue.add("fingerprint_track", 
+            { trackId: track.id, s3Key: filename },
+            { attempts: 3, backoff: { type: "exponential", delay: 5000 } }
+        );
 
         return reply.code(201).send({ id: track.id, s3_key: filename, status: track.status });
     });

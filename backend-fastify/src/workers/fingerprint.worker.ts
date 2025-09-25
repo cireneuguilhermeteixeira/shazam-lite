@@ -27,27 +27,37 @@ new Worker(
     "fingerprint",
     async (job: Job) => {
         const { trackId, s3Key } = job.data as { trackId: string; s3Key: string };
-        await prisma.track.update({ where: { id: trackId }, data: { status: "FINGERPRINTING" } });
+         try {
+            await prisma.track.update({ where: { id: trackId }, data: { status: "FINGERPRINTING" } });
 
-        const obj = await s3.send(new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: s3Key }));
-        const audioBuf = await streamToBuffer(obj.Body as any);
-        const contentType = obj.ContentType;
-        const looksMP3 = (contentType?.includes("mpeg") || s3Key.toLowerCase().endsWith(".mp3"));
+            const obj = await s3.send(new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: s3Key }));
+            const audioBuf = await streamToBuffer(obj.Body as any);
+            const contentType = obj.ContentType;
+            console.log("Content-Type:", contentType);
+            const looksMP3 = (contentType?.includes("mpeg") || s3Key.toLowerCase().endsWith(".mp3"));
 
-        const wavBuf = looksMP3 ? await anyToWavPCM16Mono44k(audioBuf) : audioBuf;
+            const wavBuf = looksMP3 ? await anyToWavPCM16Mono44k(audioBuf) : audioBuf;
 
-        const postings = await createFingerprint(wavBuf);
+            const postings = await createFingerprint(wavBuf);
 
-        const pipeline = redis.pipeline();
-        for (const p of postings) pipeline.rpush(`fp:${p.hash}`, `${trackId}:${p.tOffsetMs}`);
-        await pipeline.exec();
+            const pipeline = redis.pipeline();
+            for (const p of postings) pipeline.rpush(`fp:${p.hash}`, `${trackId}:${p.tOffsetMs}`);
+            await pipeline.exec();
 
-        await prisma.track.update({ where: { id: trackId }, data: { status: "READY" } });
+            await prisma.track.update({ where: { id: trackId }, data: { status: "READY" } });
 
-        return { hashes: postings.length };
+            return { hashes: postings.length };
+        } catch (err) {
+            await prisma.track.update({ where: { id: trackId }, data: { status: "FAILED" } });
+            throw err;
+        }
     },
     { 
         connection,
-        prefix: env.QUEUE_PREFIX
+        prefix: env.QUEUE_PREFIX,
+         concurrency: 1,
+        lockDuration: 300000,
+        stalledInterval: 60000,
+        maxStalledCount: 2   
      }
 );

@@ -9,7 +9,8 @@
     "build": "tsc -p tsconfig.json",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "worker": "tsx watch src/workers/fingerprint.worker.ts"
+    "worker": "tsx watch src/workers/fingerprint.worker.ts",
+    "worker:nowatch": "tsx src/workers/fingerprint.worker.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.637.0",
