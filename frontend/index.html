@@ -1,234 +1,75 @@
 <!doctype html>
 <html lang="en">
+
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>TuneTrace — POC (Vue)</title>
-  <style>
-    :root { --bg:#0f172a; --fg:#e2e8f0; --muted:#94a3b8; --accent:#22d3ee; }
-    html, body { height:100%; }
-    body { margin:0; background:var(--bg); color:var(--fg); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
-    .wrap { display:grid; place-items:center; min-height:100%; padding:24px; }
-    .card { width:min(560px, 96vw); background:#0b1220; border:1px solid #1f2a44; border-radius:16px; padding:24px; box-shadow: 0 10px 30px rgba(0,0,0,.3); }
-    h1 { margin:0 0 8px; font-weight:700; font-size:24px; }
-    p { margin:6px 0; color:var(--muted); }
-    .btn { display:inline-grid; place-items:center; width:100%; height:64px; margin:16px 0; border-radius:14px; border:1px solid #1f2a44; background:#111a2e; color:var(--fg); font-weight:700; letter-spacing:.3px; cursor:pointer; transition: transform .06s ease, background .2s ease, box-shadow .2s ease; }
-    .btn:hover { background:#0e1729; }
-    .btn:active { transform:scale(.98); }
-    .btn.recording { background: #12263a; border-color:#1b9fb4; box-shadow: 0 0 0 3px rgba(34,211,238,.25) inset; }
-    .grid { display:grid; gap:10px; }
-    .row { display:flex; gap:10px; align-items:center; justify-content:space-between; }
-    .pill { padding:4px 10px; border-radius:999px; background:#0f2137; border:1px solid #1f2a44; color:#9ccfd8; font-size:12px; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size:12px; color:#a3bffa; }
-    audio { width:100%; margin-top:8px; }
-    .small { font-size:12px; color:#7aa2f7; }
-    .muted { color:var(--muted); }
-    .divider { height:1px; background:#1f2a44; margin:14px 0; }
-  </style>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TuneTrace — POC (Vue)</title>
+    <link rel="stylesheet" href="./styles.css" />
 </head>
+
 <body>
-  <div id="app" class="wrap">
-    <div class="card">
-      <h1>🎧 TuneTrace — POC</h1>
-      <p>Single screen demo: press the button to capture mic, send <span class="pill">WAV chunks</span> over WebSocket, and display the first match.</p>
+    <div id="app" class="wrap">
+        <div class="card">
+            <h1>🎧 TuneTrace — POC</h1>
+            <p>Single screen demo: press the button to capture mic, send <span class="pill">WAV chunks</span> over
+                WebSocket, and display the first match.</p>
 
-      <div class="row">
-        <span class="pill">WS: <span class="mono">{{ WS_URL }}</span></span>
-        <span class="pill">API: <span class="mono">{{ API_BASE }}</span></span>
-      </div>
 
-      <button class="btn" :class="{recording: state.recording}" @click="toggle()">
-        <span v-if="!state.recording">▶ Start listening</span>
-        <span v-else>⏹ Stop listening</span>
-      </button>
+            <div class="row">
+                <span class="pill">WS: <span class="mono">{{ WS_URL }}</span></span>
+                <span class="pill">API: <span class="mono">{{ API_BASE }}</span></span>
+            </div>
 
-      <div class="grid">
-        <div class="row"><span>Status</span><span class="pill">{{ state.status }}</span></div>
-        <div class="row"><span>Chunks sent</span><span class="pill">{{ state.chunks }}</span></div>
-        <div class="row"><span>Mic sample rate</span><span class="pill">{{ state.sampleRate || '—' }} Hz</span></div>
-      </div>
 
-      <div class="divider"></div>
+            <button class="btn" :class="{recording: state.recording}" @click="toggle()">
+                <span v-if="!state.recording">▶ Start listening</span>
+                <span v-else>⏹ Stop listening</span>
+            </button>
 
-      <div v-if="state.match" class="grid">
-        <div class="row"><strong>Match</strong><span class="pill">confidence: {{ state.match.confidence }}</span></div>
-        <div><div class="row"><span>Title</span><span class="mono">{{ state.match.title }}</span></div></div>
-        <div><div class="row"><span>Artist</span><span class="mono">{{ state.match.artist }}</span></div></div>
-        <div class="row"><span>Δt</span><span class="mono">{{ state.match.delta_ms }} ms</span></div>
-        <div class="row"><span>Track ID</span><span class="mono">{{ state.match.song_id }}</span></div>
-        <div class="divider"></div>
-        <div class="row">
-          <button class="btn" @click="loadMedia()">Load media</button>
+
+            <div class="grid">
+                <div class="row"><span>Status</span><span class="pill">{{ state.status }}</span></div>
+                <div class="row"><span>Chunks sent</span><span class="pill">{{ state.chunks }}</span></div>
+                <div class="row"><span>Mic sample rate</span><span class="pill">{{ state.sampleRate || '—' }} Hz</span>
+                </div>
+            </div>
+
+
+            <div class="divider"></div>
+
+
+            <div v-if="state.match" class="grid">
+                <div class="row"><strong>Match</strong><span class="pill">confidence: {{ state.match.confidence
+                        }}</span></div>
+                <div>
+                    <div class="row"><span>Title</span><span class="mono">{{ state.match.title }}</span></div>
+                </div>
+                <div>
+                    <div class="row"><span>Artist</span><span class="mono">{{ state.match.artist }}</span></div>
+                </div>
+                <div class="row"><span>Δt</span><span class="mono">{{ state.match.delta_ms }} ms</span></div>
+                <div class="row"><span>Track ID</span><span class="mono">{{ state.match.song_id }}</span></div>
+                <div class="divider"></div>
+                <div class="row">
+                    <button class="btn" @click="loadMedia()">Load media</button>
+                </div>
+                <div v-if="state.mediaUrl" class="small">Media URL: <span class="mono">{{ state.mediaUrl }}</span></div>
+                <audio v-if="state.mediaUrl" :src="state.mediaUrl" controls preload="metadata"></audio>
+            </div>
+
+
+            <p class="small muted" style="margin-top:12px">
+                Note: To play the full track directly from MinIO/S3, your bucket must be public or proxied and
+                CORS‑enabled. Set <span class="mono">MEDIA_BASE_URL</span> to something like <span
+                    class="mono">http://localhost:9000/tunetrace-tracks/</span>.
+            </p>
         </div>
-        <div v-if="state.mediaUrl" class="small">Media URL: <span class="mono">{{ state.mediaUrl }}</span></div>
-        <audio v-if="state.mediaUrl" :src="state.mediaUrl" controls preload="metadata"></audio>
-      </div>
-
-      <p class="small muted" style="margin-top:12px">
-        Note: To play the full track directly from MinIO/S3, your bucket must be public or proxied and CORS‑enabled. Set <span class="mono">MEDIA_BASE_URL</span> to something like <span class="mono">http://localhost:9000/tunetrace-tracks/</span>.
-      </p>
     </div>
-  </div>
 
-  <!-- Vue 3 ESM from CDN -->
-  <script type="module">
-    import { createApp, reactive } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js';
 
-    // ======== Config (adjust as needed) ========
-    const WS_URL = (window.WS_URL) || 'ws://localhost:8080/ws/stream';
-    const API_BASE = (window.API_BASE) || 'http://localhost:8080';
-    // If your MinIO/S3 bucket is public (or fronted by a proxy), set:
-    const MEDIA_BASE_URL = (window.MEDIA_BASE_URL) || 'http://localhost:9000/tunetrace-tracks/';
-    // Chunk length (seconds). The backend processes each chunk independently.
-    const CHUNK_SECONDS = 1.5;
-
-    // ======== WAV encoder (PCM 16-bit LE, mono) ========
-    function floatTo16BitPCM(float32) {
-      const out = new Int16Array(float32.length);
-      for (let i = 0; i < float32.length; i++) {
-        let s = Math.max(-1, Math.min(1, float32[i]));
-        out[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-      }
-      return out;
-    }
-    function writeString(view, offset, str) { for (let i=0;i<str.length;i++) view.setUint8(offset+i, str.charCodeAt(i)); }
-    function encodeWavPCM16(samplesFloat32, sampleRate) {
-      const samples = floatTo16BitPCM(samplesFloat32);
-      const buffer = new ArrayBuffer(44 + samples.length * 2);
-      const view = new DataView(buffer);
-      writeString(view, 0, 'RIFF');
-      view.setUint32(4, 36 + samples.length * 2, true);
-      writeString(view, 8, 'WAVE');
-      writeString(view, 12, 'fmt ');
-      view.setUint32(16, 16, true); // fmt chunk size
-      view.setUint16(20, 1, true);  // audio format = PCM
-      view.setUint16(22, 1, true);  // channels = 1
-      view.setUint32(24, sampleRate, true);
-      view.setUint32(28, sampleRate * 2, true); // byte rate = sr * ch * 2
-      view.setUint16(32, 2, true);  // block align = ch * 2
-      view.setUint16(34, 16, true); // bits per sample
-      writeString(view, 36, 'data');
-      view.setUint32(40, samples.length * 2, true);
-      // PCM data
-      const out = new Int16Array(buffer, 44, samples.length);
-      out.set(samples);
-      return buffer;
-    }
-
-    // ======== Audio capture (ScriptProcessorNode for simplicity) ========
-    function createChunker(sampleRate, seconds) {
-      const chunkFrames = Math.floor(sampleRate * seconds);
-      const buffers = []; // array of Float32Array
-      let bufferedFrames = 0;
-
-      function consume(frames) {
-        let need = frames; const out = new Float32Array(frames); let used = 0;
-        while (need > 0 && buffers.length) {
-          const head = buffers[0];
-          if (head.length <= need) {
-            out.set(head, used); used += head.length; need -= head.length; buffers.shift();
-          } else {
-            out.set(head.subarray(0, need), used); buffers[0] = head.subarray(need); used += need; need = 0;
-          }
-        }
-        bufferedFrames -= frames;
-        return out;
-      }
-
-      return {
-        push(float32) { buffers.push(float32); bufferedFrames += float32.length; },
-        hasChunk() { return bufferedFrames >= chunkFrames; },
-        takeChunk() { return consume(chunkFrames); },
-        chunkFrames,
-      };
-    }
-
-    createApp({
-      setup() {
-        const state = reactive({
-          recording: false,
-          status: 'idle',
-          chunks: 0,
-          sampleRate: null,
-          match: null,
-          mediaUrl: ''
-        });
-
-        let ws = null;
-        let ctx = null, source = null, proc = null, chunker = null;
-
-        async function start() {
-          state.status = 'requesting mic...';
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
-          state.sampleRate = ctx.sampleRate;
-
-          source = ctx.createMediaStreamSource(stream);
-          proc = ctx.createScriptProcessor(4096, 1, 1);
-          chunker = createChunker(ctx.sampleRate, CHUNK_SECONDS);
-
-          proc.onaudioprocess = (e) => {
-            const ch0 = e.inputBuffer.getChannelData(0);
-            // copy frame (avoid reusing underlying buffer)
-            chunker.push(new Float32Array(ch0));
-            if (chunker.hasChunk()) {
-              const frames = chunker.takeChunk();
-              const wav = encodeWavPCM16(frames, ctx.sampleRate);
-              if (ws && ws.readyState === WebSocket.OPEN) ws.send(wav);
-              state.chunks += 1;
-            }
-          };
-
-          source.connect(proc);
-          proc.connect(ctx.destination);
-
-          ws = new WebSocket(WS_URL);
-          ws.binaryType = 'arraybuffer';
-          ws.onopen = () => { state.status = 'listening'; };
-          ws.onmessage = async (evt) => {
-            try {
-              const data = JSON.parse(evt.data);
-              if (data?.match) {
-                state.match = data.match;
-                state.status = 'matched';
-              }
-            } catch (e) { /* ignore non-JSON */ }
-          };
-          ws.onerror = () => { state.status = 'ws error'; };
-          ws.onclose = () => { if (state.recording) stop(); };
-
-          state.recording = true; state.status = 'listening';
-        }
-
-        function stop() {
-          state.recording = false; state.status = 'idle';
-          try { proc && proc.disconnect(); } catch {}
-          try { source && source.disconnect(); } catch {}
-          try { ctx && ctx.close(); } catch {}
-          try { ws && ws.close(); } catch {}
-        }
-
-        async function toggle() { state.recording ? stop() : start(); }
-
-        async function loadMedia() {
-          if (!state.match) return;
-          try {
-            const r = await fetch(`${API_BASE}/tracks/${state.match.song_id}`);
-            const meta = await r.json();
-            if (MEDIA_BASE_URL && meta?.s3Key) {
-              state.mediaUrl = MEDIA_BASE_URL + meta.s3Key;
-            } else {
-              state.mediaUrl = '';
-              alert('MEDIA_BASE_URL not set or s3Key missing. Configure a public/proxied URL for MinIO/S3.');
-            }
-          } catch (e) {
-            console.error(e);
-          }
-        }
-
-        return { state, toggle, loadMedia, WS_URL, API_BASE };
-      }
-    }).mount('#app');
-  </script>
+    <!-- Vue 3 ESM from CDN -->
+    <script type="module" src="./app.js"></script>
 </body>
+
 </html>
