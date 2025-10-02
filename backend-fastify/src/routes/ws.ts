@@ -1,4 +1,5 @@
-import { FastifyPluginAsync } from "fastify";
+import type { FastifyPluginAsync } from "fastify";
+import type { WebSocket } from "ws"; // dev dep: @types/ws
 import { createFingerprint } from "@services/fingerprint.js";
 
 // Simple matcher over Redis postings: fp:{hash} -> ["songId:offsetMs", ...]
@@ -34,19 +35,38 @@ async function matchHashes(app: any, postings: { hash: string; tOffsetMs: number
 }
 
 const wsRoutes: FastifyPluginAsync = async (app) => {
-  app.get("/stream", { websocket: true }, (conn) => {
-    conn.socket.on("message", async (msg: Buffer) => {
+  // v10+ API: (socket /* WebSocket */, req /* FastifyRequest */)
+  app.get("/stream", { websocket: true }, (socket: WebSocket, req) => {
+    app.log.info({ url: req.url }, "WS connected");
+
+    // Anexe handlers SINCRONAMENTE (recomendação do plugin)
+    socket.on("message", async (data, isBinary) => {
       try {
-        // For simplicity in the POC, expect WAV chunks from client
-        const postings = await createFingerprint(msg);
+        // Trate keepalive/JSON texto
+        if (!isBinary) {
+          const text = data.toString();
+          if (text === "ping" || text.includes('"type":"ping"')) {
+            socket.send(JSON.stringify({ ok: true, pong: Date.now() }));
+            return;
+          }
+        }
+
+        // Espera WAV binário (Buffer). Se vier ArrayBuffer, converta.
+        const buf = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
+
+        const postings = await createFingerprint(buf);
         const match = await matchHashes(app, postings);
-        conn.socket.send(JSON.stringify({ ok: true, match }));
-      } catch (err:any) {
-        app.log.error(err);
-        conn.socket.send(JSON.stringify({ ok: false, error: err?.message || "decode_error" }));
+        socket.send(JSON.stringify({ ok: true, match }));
+      } catch (err: any) {
+        app.log.error({ err }, "WS message handler error");
+        try {
+          socket.send(JSON.stringify({ ok: false, error: err?.message || "decode_error" }));
+        } catch {}
       }
     });
-    conn.socket.on("close", () => app.log.info("WS disconnected"));
+
+    socket.on("close", () => app.log.info("WS disconnected"));
+    socket.on("error", (err) => app.log.error({ err }, "WS error"));
   });
 };
 
