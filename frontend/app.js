@@ -1,5 +1,5 @@
 import { createApp, reactive } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js';
-
+import { createChunker, encodeWavPCM16 } from './utils/audio.js';
 
 // ======== Config (adjust as needed) ========
 const WS_URL = (window.WS_URL) || 'ws://localhost:8080/ws/stream';
@@ -28,8 +28,10 @@ createApp({
 
         async function start() {
             try {
+                console.log("Starting...");
                 state.status = 'requesting mic...';
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                console.log("Mic access granted.");
                 ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
                 state.sampleRate = ctx.sampleRate;
 
@@ -38,8 +40,10 @@ createApp({
                 proc = ctx.createScriptProcessor(4096, 1, 1);
                 chunker = createChunker(ctx.sampleRate, CHUNK_SECONDS);
 
+                console.log("chunker", chunker);
 
                 proc.onaudioprocess = (e) => {
+                    console.log("e", e);
                     const ch0 = e.inputBuffer.getChannelData(0);
                     // copy frame
                     chunker.push(new Float32Array(ch0));
@@ -53,10 +57,12 @@ createApp({
 
 
                 source.connect(proc);
+
                 proc.connect(ctx.destination);
 
 
                 ws = new WebSocket(WS_URL);
+                console.log("ws", ws);
                 ws.binaryType = 'arraybuffer';
                 ws.onopen = () => { state.status = 'listening'; };
                 ws.onmessage = (evt) => {
@@ -66,13 +72,22 @@ createApp({
                             state.match = data.match;
                             state.status = 'matched';
                         }
-                    } catch (_) { }
+                    } catch (e) {
+                        console.warn("Invalid WS message", evt.data, e);
+                     }
                 };
-                ws.onerror = () => { state.status = 'ws error'; };
-                ws.onclose = () => { if (state.recording) stop(); };
+                ws.onerror = () => { 
+                    console.log("WS error");
+                    state.status = 'ws error'; 
+                };
+                ws.onclose = () => {
+                    console.log("WS closed");
+                    if (state.recording) stop(); 
+                };
 
 
-                state.recording = true; state.status = 'listening';
+                state.recording = true; 
+                state.status = 'listening';
             } catch (e) {
                 console.error(e);
                 state.status = 'mic error';
@@ -81,11 +96,15 @@ createApp({
 
 
         function stop() {
-            state.recording = false; state.status = 'idle';
-            try { proc && proc.disconnect(); } catch { }
-            try { source && source.disconnect(); } catch { }
-            try { ctx && ctx.close(); } catch { }
-            try { ws && ws.close(); } catch { }
+            state.recording = false; 
+            state.status = 'idle';
+            try { 
+                if (proc) proc.disconnect(); 
+                if (source) source.disconnect();
+                if (ctx) ctx.close();
+                if (ws) ws.close();
+
+            } catch { }
         }
 
 
